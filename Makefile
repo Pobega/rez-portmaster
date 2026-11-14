@@ -51,6 +51,7 @@ push:
 		"$(STAGE_DIR)/rez/licenses/libchdr-BSD-3-Clause.txt" \
 		"$(STAGE_DIR)/rez/licenses/lzma.txt" \
 		"$(STAGE_DIR)/rez/licenses/tomlplusplus-MIT.txt" \
+		"$(STAGE_DIR)/rez/licenses/rcheevos-MIT.txt" \
 		"$(NEXTUI_GAMEDIR)/licenses/"
 	@echo "==> Cleaning previous unpacked binary so PortMaster patcher runs on boot..."
 	$(ADB) shell 'rm -f "$(NEXTUI_GAMEDIR)/rez" "$(NEXTUI_GAMEDIR)/rez.aarch64" "$(NEXTUI_GAMEDIR)/extracted/fs/1ST_READ.BIN" && rmdir "$(NEXTUI_GAMEDIR)/disc" 2>/dev/null || true; sync'

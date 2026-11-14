@@ -27,8 +27,13 @@ constexpr std::uint32_t kBoxSelect1 = 0x8C303F38u;
 constexpr std::uint32_t kBoxSelect3 = 0x8C303F90u;
 constexpr std::uint32_t kBoxSelect4 = 0x8C303FBCu;
 constexpr std::uint32_t kBoxSelectItems = 0x8C30460Cu;
-constexpr std::uint32_t kBoxSelectArrowLeftIdx = 0x8C303ED4u;
-constexpr std::uint32_t kBoxSelectArrowRightIdx = 0x8C303EE4u;
+constexpr std::uint32_t kIconLeftArrowWidthAddr = 0x8C10C0D4u;
+constexpr std::uint32_t kIconLeftArrowHeightAddr = 0x8C10C0D8u;
+constexpr std::uint32_t kIconRightArrowWidthAddr = 0x8C10C0E0u;
+constexpr std::uint32_t kIconRightArrowHeightAddr = 0x8C10C0E4u;
+constexpr std::uint32_t kArrowDefaultWidthBits = 0x41800000u;
+constexpr std::uint32_t kArrowDefaultHeightBits = 0x41B80000u;
+constexpr std::size_t kSelectValueMaxLen = 15;
 constexpr unsigned kBoxSelectWords = 11;
 constexpr unsigned kLanguageCount = 6;
 constexpr std::uint32_t kRowTypeNone = 0u;
@@ -135,7 +140,16 @@ bool overlay_as_read(dream::Memory& m) {
     return m.read32(kRows + 24) == 1 && m.read32(kRows + 36) == 0 && m.read32(kRows + 16 * kRowBytes + 24) == 4;
 }
 
-void update_ra_rows(dream::Memory& m) {
+void set_box_select_arrows_visible(dream::Memory& m, bool visible) {
+    const std::uint32_t w = visible ? kArrowDefaultWidthBits : 0u;
+    const std::uint32_t h = visible ? kArrowDefaultHeightBits : 0u;
+    m.write32(kIconLeftArrowWidthAddr, w);
+    m.write32(kIconLeftArrowHeightAddr, h);
+    m.write32(kIconRightArrowWidthAddr, w);
+    m.write32(kIconRightArrowHeightAddr, h);
+}
+
+void update_ra_strings(dream::Memory& m) {
     const std::string ra_status = dreamcomp::ra::menu_ra_status_label();
     const std::string sync_head = dreamcomp::ra::menu_sync_progress_header();
 
@@ -144,6 +158,10 @@ void update_ra_rows(dream::Memory& m) {
     write_text(m, kRaStatusDynAddr, ra_status.c_str());
     write_text(m, kSyncRowDynAddr, "Sync RetroAchievements");
     write_text(m, kSyncHeadDynAddr, sync_head.c_str());
+}
+
+void update_ra_rows(dream::Memory& m) {
+    update_ra_strings(m);
 
     constexpr std::uint32_t row5_addr = kRows + 5 * kRowBytes;
     constexpr std::uint32_t row6_addr = kRows + 6 * kRowBytes;
@@ -285,8 +303,7 @@ void page_open(dream::Memory& m) {
 }
 
 void page_close(dream::Memory& m) {
-    m.write32(kBoxSelectArrowLeftIdx, 1u);
-    m.write32(kBoxSelectArrowRightIdx, 2u);
+    set_box_select_arrows_visible(m, true);
     for (unsigned r = 0; r < kRowCount; ++r)
         for (unsigned w = 0; w < kRowWords; ++w)
             m.write32(kRows + r * kRowBytes + 4 * w, g_rows[r][w]);
@@ -379,30 +396,19 @@ void recomp_menu_end(dream::Memory& m) {
 DC_HOOK_ENTRY(recomp_get) {
     if (!rez::g_page)
         return false;
-    rez::update_ra_rows(m);
-    if (c.cycles >= c.next_event) {
-        c.pc = 0x8C301464u;
-        dream::sh4::deliver_irq(c, m);
-    }
+    rez::update_ra_strings(m);
     if (c.pr == rez::kBoxSelectInputGetReturnAddr) {
-        if (c.r[13] == rez::kBoxSelect4) {
-            m.write32(rez::kBoxSelectArrowLeftIdx, 4u);
-            m.write32(rez::kBoxSelectArrowRightIdx, 4u);
-            c.r[0] = 0u;
+        if (c.r[13] == rez::kBoxSelect0) {
+            c.r[0] = static_cast<std::uint32_t>(dreamcomp::current_aspect_family());
+        } else if (c.r[13] == rez::kBoxSelect1) {
+            c.r[0] = dreamcomp::current_resolution_index();
+        } else if (c.r[13] == rez::kBoxSelect3) {
+            c.r[0] = static_cast<std::uint32_t>(dreamcomp::ra::toast_style());
         } else {
-            m.write32(rez::kBoxSelectArrowLeftIdx, 1u);
-            m.write32(rez::kBoxSelectArrowRightIdx, 2u);
-            if (c.r[13] == rez::kBoxSelect0) {
-                c.r[0] = static_cast<std::uint32_t>(dreamcomp::current_aspect_family());
-            } else if (c.r[13] == rez::kBoxSelect1) {
-                c.r[0] = dreamcomp::current_resolution_index();
-            } else if (c.r[13] == rez::kBoxSelect3) {
-                c.r[0] = static_cast<std::uint32_t>(dreamcomp::ra::toast_style());
-            } else {
-                c.r[0] = 0u;
-            }
+            c.r[0] = 0u;
         }
     } else if (c.pr == rez::kBoxSelectDrawReturnAddr) {
+        rez::set_box_select_arrows_visible(m, c.r[14] != rez::kBoxSelect4);
         std::string dyn_label;
         const char* label = "";
         if (c.r[14] == rez::kBoxSelect0) {
@@ -417,7 +423,9 @@ DC_HOOK_ENTRY(recomp_get) {
             dyn_label = dreamcomp::ra::menu_sync_unsynced_label();
             label = dyn_label.c_str();
         }
-        rez::write_text(m, rez::kSelectValue.at, label);
+        char buf[rez::kSelectValueMaxLen + 1];
+        std::snprintf(buf, sizeof(buf), "%.15s", label);
+        rez::write_text(m, rez::kSelectValue.at, buf);
         c.r[0] = 0u;
     } else {
         const std::uint32_t set_addr =
@@ -436,11 +444,6 @@ DC_HOOK_ENTRY(recomp_get) {
 DC_HOOK_ENTRY(recomp_set) {
     if (!rez::g_page)
         return false;
-    rez::update_ra_rows(m);
-    if (c.cycles >= c.next_event) {
-        c.pc = 0x8C30146Au;
-        dream::sh4::deliver_irq(c, m);
-    }
     if (c.pr == rez::kBoxSelectSetLeftReturnAddr || c.pr == rez::kBoxSelectSetRightReturnAddr) {
         if (c.r[13] == rez::kBoxSelect0) {
             dreamcomp::set_aspect_family(static_cast<dreamcomp::AspectFamily>(c.r[4]));
@@ -471,12 +474,9 @@ DC_HOOK_ENTRY(recomp_set) {
 DC_HOOK_ENTRY(recomp_sync_achievements) {
     if (!rez::g_page)
         return false;
-    if (c.cycles >= c.next_event) {
-        c.pc = 0x8C301094u;
-        dream::sh4::deliver_irq(c, m);
-    }
     dreamcomp::ra::sync_achievements_now();
     rez::update_ra_rows(m);
+    c.r[0] = 0u;
     c.cycles += dream::sh4::cost(4);
     return true;
 }
