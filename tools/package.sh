@@ -63,6 +63,7 @@ cp THIRD_PARTY_NOTICES.md "$PKG/rez/licenses/THIRD_PARTY_NOTICES.md"
 cp engine/third_party/libchdr/LICENSE.txt "$PKG/rez/licenses/libchdr-BSD-3-Clause.txt"
 cp engine/third_party/libchdr/deps/lzma-26.02/LICENSE "$PKG/rez/licenses/lzma.txt"
 cp engine/third_party/tomlplusplus/LICENSE "$PKG/rez/licenses/tomlplusplus-MIT.txt"
+cp third_party/rcheevos/LICENSE "$PKG/rez/licenses/rcheevos-MIT.txt"
 
 rm -f "$ZIP"
 python3 - "$PKG" "$ZIP" <<'EOF'
