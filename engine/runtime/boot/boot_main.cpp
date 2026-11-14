@@ -315,6 +315,8 @@ struct Live {
         presenter.forget_views();
         overlay_presenter.forget_views();
         fps_presenter.forget_views();
+        toast_presenter.forget_views();
+        toast_uploaded_seq_ = 0;
         const bool readback = offscreen.readback;
         offscreen.destroy();
         offscreen.readback = readback;
@@ -400,6 +402,11 @@ struct Live {
         fps_presenter.overlay_layer = true;  // the zero-readback GPU HUD layer
         if (!fps_presenter.create(window.context(), window.render_pass())) {
             error = fps_presenter.error();
+            return false;
+        }
+        toast_presenter.overlay_layer = true;
+        if (!toast_presenter.create(window.context(), window.render_pass())) {
+            error = toast_presenter.error();
             return false;
         }
         // Pipelines from earlier runs, created now rather than mid-game. Beside the bindings, or
@@ -925,6 +932,7 @@ public:
         presenter.draw_view(cmd, offscreen.sampled_view(), offscreen.width(), offscreen.height(),
                             window.extent());
         draw_fps_hud(cmd);
+        draw_toast_hud(cmd);
         if (!window.end_frame(image))
             window.recreate_swapchain();
         const float swap_ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - swap_start).count();
@@ -1060,11 +1068,13 @@ public:
             if (from_renderer && !menu.is_open() && !overlay_up &&
                 !window.pressed(Control::Screenshot)) {
                 if (rendered_seq_ != 0 && rendered_seq_ == presented_seq_ &&
-                    show_fps == presented_show_fps_ && screenshot_at.empty()) {
+                    show_fps == presented_show_fps_ &&
+                    current_toast_seq() == presented_toast_seq_ && screenshot_at.empty()) {
                     return true;
                 }
                 presented_seq_ = rendered_seq_;
                 presented_show_fps_ = show_fps;
+                presented_toast_seq_ = current_toast_seq();
                 RenderJob job = take_job();
                 job.present = true;
                 job.shown = shown;
@@ -1086,6 +1096,7 @@ public:
                 presenter.draw_view(icmd, interp_off.sampled_view(), interp_off.width(),
                                     interp_off.height(), window.extent());
                 draw_fps_hud(icmd);
+                draw_toast_hud(icmd);
                 if (!window.end_frame(iimage))
                     window.recreate_swapchain();
                 // Half a guest frame (59.94 Hz) before the real one.
@@ -1167,6 +1178,7 @@ public:
         if (overlay_px)
             overlay_presenter.draw(cmd, window.extent());
         draw_fps_hud(cmd);
+        draw_toast_hud(cmd);
         if (!window.end_frame(image))
             window.recreate_swapchain();
         last_present = std::chrono::steady_clock::now();
@@ -1452,6 +1464,37 @@ public:
         fps_presenter.draw_rect(cmd, ext, 8, 8, hud_w, hud_h);
     }
 
+    std::uint64_t current_toast_seq() const {
+        for (dream::host::Extension* ext : dream::host::extensions()) {
+            if (!ext)
+                continue;
+            const std::uint64_t seq = ext->toast_sequence();
+            if (seq != 0)
+                return seq;
+        }
+        return 0;
+    }
+
+    void draw_toast_hud(VkCommandBuffer cmd) {
+        const auto ext = window.extent();
+        dream::host::ToastView view{};
+        for (dream::host::Extension* e : dream::host::extensions()) {
+            if (!e)
+                continue;
+            if (e->query_toast(ext.width, ext.height, toast_uploaded_seq_, view, toast_pixels_)) {
+                if (view.width > 0 && view.height > 0 && view.dst_w > 0 && view.dst_h > 0) {
+                    if (view.seq != toast_uploaded_seq_ &&
+                        toast_pixels_.size() == static_cast<std::size_t>(view.width) * view.height) {
+                        toast_presenter.upload(cmd, toast_pixels_.data(), view.width, view.height);
+                        toast_uploaded_seq_ = view.seq;
+                    }
+                    toast_presenter.draw_rect(cmd, ext, view.dst_x, view.dst_y, view.dst_w, view.dst_h);
+                }
+                break;
+            }
+        }
+    }
+
     void screenshot() { screenshot(shown, from_renderer, guest_frame); }
 
     // What is displayed passed in: the render thread's present takes its shot from the values its
@@ -1527,6 +1570,10 @@ public:
     dream::render::vk::Presenter presenter;
     dream::render::vk::Presenter overlay_presenter;  // the in-game menu layer
     dream::render::vk::Presenter fps_presenter;      // the zero-readback GPU HUD layer
+    dream::render::vk::Presenter toast_presenter;
+    std::uint64_t toast_uploaded_seq_ = 0;
+    std::uint64_t presented_toast_seq_ = 0;
+    std::vector<std::uint32_t> toast_pixels_;
     std::uint32_t overlay_w = 0, overlay_h = 0;
     bool overlay_dirty = true;
     dream::render::DisplayList decoder;

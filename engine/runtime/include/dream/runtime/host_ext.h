@@ -28,6 +28,16 @@ struct Frame;
 
 namespace dream::host {
 
+struct ToastView {
+    std::uint64_t seq = 0;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    int dst_x = 0;
+    int dst_y = 0;
+    std::uint32_t dst_w = 0;
+    std::uint32_t dst_h = 0;
+};
+
 class Extension {
 public:
     virtual ~Extension() = default;
@@ -89,6 +99,12 @@ public:
     virtual void draw_overlay(std::uint32_t* rgba, unsigned w, unsigned h, unsigned view_w,
                               unsigned view_h) {
         (void)rgba, (void)w, (void)h, (void)view_w, (void)view_h;
+    }
+    virtual std::uint64_t toast_sequence() { return 0; }
+    virtual bool query_toast(unsigned view_w, unsigned view_h, std::uint64_t last_uploaded_seq,
+                             ToastView& out_view, std::vector<std::uint32_t>& out_pixels) {
+        (void)view_w, (void)view_h, (void)last_uploaded_seq, (void)out_view, (void)out_pixels;
+        return false;
     }
 };
 
