@@ -61,10 +61,12 @@ target_compile_features(rcheevos PRIVATE c_std_99)
 
 add_library(dreamcomp_core OBJECT src/framework/core.cpp src/framework/settings.cpp
                                   src/framework/hud.cpp src/framework/sharp2d.cpp
-                                  src/framework/disc_folder.cpp)
+                                  src/framework/disc_folder.cpp
+                                  src/framework/ra_creds.cpp
+                                  src/framework/ra_http.cpp)
 target_include_directories(dreamcomp_core PUBLIC ${PROJECT_SOURCE_DIR}/include
                                                  ${PROJECT_SOURCE_DIR}/src/framework)
-target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::game_config rcheevos)
+target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::game_config rcheevos ${CMAKE_DL_LIBS})
 target_compile_features(dreamcomp_core PUBLIC cxx_std_20)
 target_compile_options(dreamcomp_core PRIVATE ${DREAMCOMP_WARNINGS})
 if(TARGET dream_render_vk)
