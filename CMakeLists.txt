@@ -76,3 +76,12 @@ if(TARGET dream_render_vk)
 endif()
 
 add_subdirectory(game)
+
+enable_testing()
+add_executable(test_ra_e2e tests/test_ra_e2e.cpp)
+target_include_directories(test_ra_e2e PRIVATE src engine/core/include engine/runtime/include engine/render/include
+                                               third_party/rcheevos/include third_party/rcheevos/src)
+target_link_libraries(test_ra_e2e PRIVATE dreamcomp_core dream::runtime dream::render rcheevos ${CMAKE_DL_LIBS})
+target_compile_features(test_ra_e2e PRIVATE cxx_std_20)
+target_compile_options(test_ra_e2e PRIVATE ${DREAMCOMP_WARNINGS})
+add_test(NAME test_ra_e2e COMMAND test_ra_e2e WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
