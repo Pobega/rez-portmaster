@@ -27,6 +27,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -35,6 +36,10 @@ namespace {
 
 constexpr std::uint32_t kToastWidth = 320;
 constexpr std::uint32_t kToastHeight = 48;
+constexpr std::uint64_t kMinBootVblanksBeforeFrame = 180;
+constexpr std::uint32_t kMainProgramSentinelAddr = 0x8C010000u;
+constexpr std::uint32_t kOverlaySentinelAddr = 0x8C300000u;
+constexpr std::uint32_t kRaWarningAchievementMinId = 101000001u;
 
 constexpr std::uint32_t make_premul_rgba(unsigned r, unsigned g, unsigned b, unsigned a) {
     const unsigned pr = (r * a + 127u) / 255u;
@@ -443,6 +448,7 @@ public:
     const char* name() const override { return "RetroAchievements"; }
 
     void on_start(dream::System& sys) override {
+        vblank_count_ = 0;
         sys_ = &sys;
         g_active_system = &sys;
         g_active_disc = sys.disc;
@@ -457,6 +463,12 @@ public:
         } else {
             toast_style_ = ToastStyle::PauseTab;
         }
+
+        creds_ = resolve_credentials(dreamcomp::settings());
+        if (server_username_.empty() && !creds_.server_username.empty()) {
+            server_username_ = creds_.server_username;
+        }
+        refresh_pending_sync_count();
 
         if (!sys.disc) {
             return;
@@ -487,12 +499,19 @@ public:
     }
 
     void on_vblank(dream::System& sys) override {
-        (void)sys;
+        ++vblank_count_;
         if (http_) {
             http_->dispatch_callbacks();
         }
         if (client_) {
-            rc_client_do_frame(client_);
+            if (game_loaded_ && is_game_ram_ready(sys)) {
+                rc_client_do_frame(client_);
+            } else {
+                rc_client_idle(client_);
+            }
+        }
+        if ((vblank_count_ % 60) == 0) {
+            refresh_pending_sync_count();
         }
     }
 
@@ -518,6 +537,7 @@ public:
         game_loaded_ = false;
         connecting_ = false;
         syncing_ = false;
+        silent_reload_ = false;
     }
 
     void on_stop(dream::System& sys, const char* why) override {
@@ -604,30 +624,80 @@ public:
         return is_enabled() && creds_.source != CredentialSource::None;
     }
 
-    unsigned int pending_sync_count() const {
-        if (!is_enabled()) {
+    bool is_game_ram_ready(dream::System& sys) const {
+        return vblank_count_ >= kMinBootVblanksBeforeFrame &&
+               sys.memory.read32(kMainProgramSentinelAddr) != 0u &&
+               sys.memory.read32(kOverlaySentinelAddr) != 0u;
+    }
+
+    void refresh_achievement_counts() {
+        if (client_ && game_loaded_) {
+            rc_client_user_game_summary_t summary{};
+            rc_client_get_user_game_summary(client_, &summary);
+            unlocked_count_ = summary.num_unlocked_achievements;
+            total_count_ = summary.num_core_achievements;
+        }
+    }
+
+    unsigned int count_pending_awards_on_disk() const {
+        std::vector<std::string> user_keys;
+        auto add_key = [&](const std::string& u) {
+            if (u.empty()) {
+                return;
+            }
+            const std::string k = normalize_user_key(u);
+            if (!k.empty() && std::find(user_keys.begin(), user_keys.end(), k) == user_keys.end()) {
+                user_keys.push_back(k);
+            }
+        };
+
+        add_key(server_username_);
+        add_key(creds_.server_username);
+        add_key(creds_.username);
+
+        if (user_keys.empty()) {
+            const auto temp_creds = resolve_credentials(dreamcomp::settings());
+            add_key(temp_creds.server_username);
+            add_key(temp_creds.username);
+        }
+
+        if (user_keys.empty()) {
             return 0;
         }
-        const std::string user = creds_.username;
-        if (user.empty()) {
-            return 0;
-        }
-        const std::string ukey = normalize_user_key(user);
+
         const std::filesystem::path base_cache =
             http_ ? http_->cache_dir() : (dreamcomp::settings().file().parent_path() / "ra_cache");
-        const std::filesystem::path awards_file = base_cache / ("pending_awards_" + ukey + ".txt");
-        std::ifstream file(awards_file);
-        if (!file.is_open()) {
-            return 0;
-        }
-        std::string line;
-        unsigned int count = 0;
-        while (std::getline(file, line)) {
-            if (!line.empty() && line.front() != '#') {
-                ++count;
+
+        std::set<uint32_t> unique_ids;
+        for (const auto& ukey : user_keys) {
+            const std::filesystem::path awards_file = base_cache / ("pending_awards_" + ukey + ".txt");
+            std::ifstream file(awards_file);
+            if (!file.is_open()) {
+                continue;
+            }
+            std::string line;
+            while (std::getline(file, line)) {
+                if (line.empty() || line.front() == '#') {
+                    continue;
+                }
+                std::istringstream iss(line);
+                uint32_t ach_id = 0;
+                if (iss >> ach_id) {
+                    if (ach_id > 0 && ach_id < kRaWarningAchievementMinId) {
+                        unique_ids.insert(ach_id);
+                    }
+                }
             }
         }
-        return count;
+        return static_cast<unsigned int>(unique_ids.size());
+    }
+
+    void refresh_pending_sync_count() {
+        cached_pending_count_.store(count_pending_awards_on_disk(), std::memory_order_relaxed);
+    }
+
+    unsigned int pending_sync_count() const {
+        return is_enabled() ? cached_pending_count_.load(std::memory_order_relaxed) : 0u;
     }
 
     void sync_achievements_now() {
@@ -655,14 +725,24 @@ public:
         http_->sync_now(creds_.username, server_username_, creds_.token, creds_.password,
                         [this](const SyncResult& result) {
                             syncing_ = false;
+                            cached_pending_count_.store(result.remaining_count, std::memory_order_relaxed);
                             if (!result.resolved_token.empty()) {
                                 creds_.token = result.resolved_token;
+                            }
+                            if (!result.resolved_server_username.empty()) {
+                                server_username_ = result.resolved_server_username;
+                                dreamcomp::settings().set("ra_server_username", server_username_);
+                                dreamcomp::settings().save();
                             }
                             if (result.online) {
                                 const std::string detail = (result.synced_count > 0)
                                                                ? ("synced " + std::to_string(result.synced_count) + " awards")
                                                                : "all awards up to date";
                                 show_toast_immediate("sync complete", detail, "", 3.0f, "", false, "sync", false);
+                                if (client_ && !game_hash_.empty()) {
+                                    silent_reload_ = true;
+                                    rc_client_begin_load_game(client_, game_hash_.c_str(), &load_game_callback, this);
+                                }
                             } else {
                                 const std::string err = result.error.empty() ? "server unavailable" : result.error;
                                 show_toast_immediate("sync failed", err, "", 3.0f, "", true, "sync", false);
@@ -747,8 +827,11 @@ private:
     bool connecting_ = false;
     bool login_failed_ = false;
     bool syncing_ = false;
+    bool silent_reload_ = false;
     std::uint32_t unlocked_count_ = 0;
     std::uint32_t total_count_ = 0;
+    std::uint64_t vblank_count_ = 0;
+    std::atomic<unsigned int> cached_pending_count_{0};
     dream::System* sys_ = nullptr;
     std::string game_hash_;
     Credentials creds_;
@@ -835,9 +918,15 @@ private:
 
     void start_session_if_configured() {
         login_failed_ = false;
-        unlocked_count_ = 0;
-        total_count_ = 0;
+        if (!silent_reload_) {
+            unlocked_count_ = 0;
+            total_count_ = 0;
+        }
         creds_ = resolve_credentials(dreamcomp::settings());
+        if (server_username_.empty() && !creds_.server_username.empty()) {
+            server_username_ = creds_.server_username;
+        }
+        refresh_pending_sync_count();
         if (creds_.source == CredentialSource::None) {
             std::printf("rez: RetroAchievements no credentials configured\n");
             return;
@@ -896,11 +985,13 @@ private:
             if (user->token && *user->token) {
                 creds_.token = user->token;
             }
-            server_username_ = !creds_.server_username.empty()
-                                   ? creds_.server_username
-                                   : ((user->username && *user->username) ? user->username : creds_.username);
+            server_username_ = (user->username && *user->username)
+                                   ? user->username
+                                   : (!creds_.server_username.empty() ? creds_.server_username : creds_.username);
             display_username_ = (user->display_name && *user->display_name) ? user->display_name : server_username_;
+            refresh_pending_sync_count();
 
+            dreamcomp::settings().set("ra_server_username", server_username_);
             if (creds_.source == CredentialSource::SettingsIni && !creds_.password.empty()) {
                 dreamcomp::settings().set("ra_token", creds_.token);
                 dreamcomp::settings().set("ra_password", "");
@@ -908,6 +999,8 @@ private:
             } else if (creds_.source != CredentialSource::SettingsIni) {
                 dreamcomp::settings().set("ra_cached_user", creds_.username);
                 dreamcomp::settings().set("ra_cached_token", creds_.token);
+                dreamcomp::settings().save();
+            } else {
                 dreamcomp::settings().save();
             }
         }
@@ -925,9 +1018,13 @@ private:
     }
 
     void on_load_game_finished(int result, const char* error_message, rc_client_t* client) {
+        const bool was_silent_reload = silent_reload_;
+        silent_reload_ = false;
         connecting_ = false;
         if (result != RC_OK) {
-            login_failed_ = true;
+            if (!was_silent_reload) {
+                login_failed_ = true;
+            }
             std::printf("rez: RetroAchievements game load failed: %s\n", error_message ? error_message : "unknown");
             return;
         }
@@ -937,20 +1034,14 @@ private:
             rc_client_create_achievement_list(client, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE,
                                               RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_PROGRESS);
         std::vector<std::string> badge_names;
-        uint32_t unlocked = 0;
-        uint32_t total = 0;
 
         if (list) {
             for (uint32_t b = 0; b < list->num_buckets; ++b) {
                 const auto& bucket = list->buckets[b];
                 for (uint32_t a = 0; a < bucket.num_achievements; ++a) {
                     const auto* ach = bucket.achievements[a];
-                    if (!ach) {
+                    if (!ach || ach->id >= kRaWarningAchievementMinId) {
                         continue;
-                    }
-                    ++total;
-                    if (ach->unlocked) {
-                        ++unlocked;
                     }
                     if (ach->badge_name[0]) {
                         badge_names.emplace_back(ach->badge_name);
@@ -960,19 +1051,22 @@ private:
             rc_client_destroy_achievement_list(list);
         }
 
-        unlocked_count_ = unlocked;
-        total_count_ = total;
+        refresh_achievement_counts();
 
         if (!badge_names.empty() && http_) {
             http_->prefetch_badges_async(std::move(badge_names));
+        }
+
+        if (was_silent_reload) {
+            return;
         }
 
         const bool offline = http_ ? http_->offline_mode() : false;
         const std::string header = "retroachievements";
         const std::string tag = offline ? "offline" : "softcore";
         const std::string user_label = display_username_.empty() ? creds_.username : display_username_;
-        const std::string desc = std::to_string(unlocked) + " / " +
-                                 std::to_string(total) + (offline ? " cached" : " unlocked");
+        const std::string desc = std::to_string(unlocked_count_) + " / " +
+                                 std::to_string(total_count_) + (offline ? " cached" : " unlocked");
 
         enqueue_toast(header, user_label, desc, 4.0f, "", offline, tag);
 
@@ -991,9 +1085,12 @@ private:
 
     void handle_client_event(const rc_client_event_t& event) {
         if (event.type == RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED && event.achievement) {
-            if (unlocked_count_ < total_count_) {
-                ++unlocked_count_;
+            if (event.achievement->category != RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE ||
+                event.achievement->id >= kRaWarningAchievementMinId) {
+                return;
             }
+            refresh_achievement_counts();
+            refresh_pending_sync_count();
             const bool offline = http_ ? http_->offline_mode() : false;
             const std::string header = offline ? "offline unlock" : "achievement";
             const std::string title = event.achievement->title ? event.achievement->title : "";
@@ -1005,6 +1102,9 @@ private:
         } else if ((event.type == RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_SHOW ||
                     event.type == RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_UPDATE) &&
                    event.achievement) {
+            if (event.achievement->id >= kRaWarningAchievementMinId) {
+                return;
+            }
             const std::string title = event.achievement->title ? event.achievement->title : "";
             const std::string progress = event.achievement->measured_progress;
             const std::string badge = event.achievement->badge_name[0] ? event.achievement->badge_name : "";

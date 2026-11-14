@@ -18,11 +18,17 @@ struct SyncResult {
     unsigned int remaining_count = 0;
     std::string error;
     std::string resolved_token;
+    std::string resolved_server_username;
 };
 
 using SyncCallback = std::function<void(const SyncResult&)>;
 
 std::string normalize_user_key(std::string_view user);
+constexpr const char* kUserAgent = "rez-recompiled/0.2.3 (Linux; rcheevos)";
+inline const char* user_agent() noexcept { return kUserAgent; }
+
+void reconcile_unlocked_cache_from_session(const std::filesystem::path& cache_dir, const std::string& ukey,
+                                           const std::string& session_body);
 
 class HttpEngine {
 public:
@@ -39,6 +45,9 @@ public:
 
     void sync_now(const std::string& username, const std::string& server_username,
                   const std::string& token, const std::string& password, SyncCallback callback);
+
+    using TransportHook = std::function<std::pair<int, std::string>(const std::string& url, const std::string& post_data)>;
+    void set_transport_hook(TransportHook hook);
 
     bool offline_mode() const noexcept { return offline_mode_.load(std::memory_order_relaxed); }
     void set_offline_mode(bool offline) noexcept { offline_mode_.store(offline, std::memory_order_relaxed); }

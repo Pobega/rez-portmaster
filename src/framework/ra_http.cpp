@@ -19,6 +19,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -54,12 +55,12 @@ constexpr int kCurlinfoResponseCode = 0x200002;
 
 constexpr long kConnectTimeoutSeconds = 5L;
 constexpr long kTransferTimeoutSeconds = 15L;
-constexpr const char* kUserAgent = "rez-recompiled/0.2.2 (Linux; rcheevos)";
 
 constexpr int kCurlePeerFailedVerification = 60;
 constexpr int kCurleSslCacertBadfile = 77;
 constexpr int kHttpOk = 200;
 constexpr int kHttpServerErrorThreshold = 500;
+constexpr uint32_t kRaWarningAchievementMinId = 101000001u;
 
 using fn_curl_global_init = int (*)(long);
 using fn_curl_easy_init = void* (*)();
@@ -217,8 +218,9 @@ std::vector<PendingAwardEntry> load_pending_awards(const std::filesystem::path& 
         std::istringstream iss(line);
         PendingAwardEntry entry;
         long long epoch = 0;
-        if (iss >> entry.achievement_id >> epoch >> entry.game_hash) {
+        if (iss >> entry.achievement_id >> epoch) {
             entry.unlocked_epoch = static_cast<std::time_t>(epoch);
+            iss >> entry.game_hash;
             entries.push_back(std::move(entry));
         }
     }
@@ -235,6 +237,9 @@ bool save_pending_awards(const std::filesystem::path& file_path, const std::vect
 
 void record_pending_award_entry(const std::filesystem::path& awards_file, uint32_t achievement_id,
                                 const std::string& game_hash, std::time_t unlocked_epoch) {
+    if (achievement_id == 0 || achievement_id >= kRaWarningAchievementMinId) {
+        return;
+    }
     std::vector<PendingAwardEntry> entries = load_pending_awards(awards_file);
     for (const auto& item : entries) {
         if (item.achievement_id == achievement_id) {
@@ -287,6 +292,9 @@ bool save_unlocked_cache(const std::filesystem::path& file_path, const std::vect
 
 void record_unlocked_cache_entry(const std::filesystem::path& file_path, uint32_t achievement_id,
                                  std::time_t unlocked_epoch) {
+    if (achievement_id == 0 || achievement_id >= kRaWarningAchievementMinId) {
+        return;
+    }
     std::vector<UnlockedCacheEntry> entries = load_unlocked_cache(file_path);
     for (const auto& item : entries) {
         if (item.achievement_id == achievement_id) {
@@ -322,7 +330,15 @@ public:
         }
     }
 
+    void set_hook(HttpEngine::TransportHook hook) {
+        hook_ = std::move(hook);
+    }
+
     Result perform(const std::string& url, const std::string& post_data, const std::string& content_type) {
+        if (hook_) {
+            auto res = hook_(url, post_data);
+            return {res.first, std::move(res.second)};
+        }
         if (curl_ && fn_setopt_ && fn_perform_ && fn_getinfo_) {
             return perform_libcurl(url, post_data, content_type);
         }
@@ -330,6 +346,7 @@ public:
     }
 
 private:
+    HttpEngine::TransportHook hook_;
     void* dl_handle_ = nullptr;
     void* curl_ = nullptr;
     fn_curl_global_init fn_global_init_ = nullptr;
@@ -550,6 +567,55 @@ private:
 HttpEngine* g_active_engine = nullptr;
 
 }  // namespace
+
+void reconcile_unlocked_cache_from_session(const std::filesystem::path& cache_dir, const std::string& ukey,
+                                           const std::string& session_body) {
+    rc_api_server_response_t srv_resp{};
+    srv_resp.body = session_body.data();
+    srv_resp.body_length = session_body.size();
+    srv_resp.http_status_code = kHttpOk;
+
+    rc_api_start_session_response_t sess_resp{};
+    const int parse_res = rc_api_process_start_session_server_response(&sess_resp, &srv_resp);
+    if (parse_res == RC_OK && sess_resp.response.succeeded) {
+        std::map<uint32_t, std::time_t> unlock_map;
+        if (sess_resp.unlocks) {
+            for (uint32_t i = 0; i < sess_resp.num_unlocks; ++i) {
+                const uint32_t id = sess_resp.unlocks[i].achievement_id;
+                if (id > 0 && id < kRaWarningAchievementMinId) {
+                    unlock_map[id] = sess_resp.unlocks[i].when;
+                }
+            }
+        }
+        if (sess_resp.hardcore_unlocks) {
+            for (uint32_t i = 0; i < sess_resp.num_hardcore_unlocks; ++i) {
+                const uint32_t id = sess_resp.hardcore_unlocks[i].achievement_id;
+                if (id > 0 && id < kRaWarningAchievementMinId) {
+                    unlock_map[id] = sess_resp.hardcore_unlocks[i].when;
+                }
+            }
+        }
+
+        const std::filesystem::path awards_file = cache_dir / ("pending_awards_" + ukey + ".txt");
+        const auto pending = load_pending_awards(awards_file);
+        for (const auto& entry : pending) {
+            if (entry.achievement_id > 0 && entry.achievement_id < kRaWarningAchievementMinId) {
+                if (unlock_map.find(entry.achievement_id) == unlock_map.end()) {
+                    unlock_map[entry.achievement_id] = entry.unlocked_epoch;
+                }
+            }
+        }
+
+        std::vector<UnlockedCacheEntry> entries;
+        entries.reserve(unlock_map.size());
+        for (const auto& [id, epoch] : unlock_map) {
+            entries.push_back({id, epoch});
+        }
+        const std::filesystem::path unl_cache_file = cache_dir / ("unlocked_cache_" + ukey + ".txt");
+        save_unlocked_cache(unl_cache_file, entries);
+        rc_api_destroy_start_session_response(&sess_resp);
+    }
+}
 
 struct HttpEngine::Impl {
     struct ServerCallItem {
@@ -821,6 +887,7 @@ struct HttpEngine::Impl {
             }
         } else if (method == "startsession" && !ukey.empty() && !game_id.empty()) {
             atomic_write_file(cache_dir / ("startsession_" + ukey + "_" + game_id + ".json"), response_body);
+            reconcile_unlocked_cache_from_session(cache_dir, ukey, response_body);
         }
     }
 
@@ -947,6 +1014,37 @@ struct HttpEngine::Impl {
         return false;
     }
 
+    std::vector<std::string> collect_candidate_user_keys(std::initializer_list<std::string_view> users) const {
+        std::vector<std::string> keys;
+        for (std::string_view u : users) {
+            if (u.empty()) {
+                continue;
+            }
+            const std::string k = normalize_user_key(u);
+            if (!k.empty() && std::find(keys.begin(), keys.end(), k) == keys.end()) {
+                keys.push_back(k);
+            }
+        }
+        return keys;
+    }
+
+    std::vector<PendingAwardEntry> load_deduped_pending_awards(const std::vector<std::string>& keys) const {
+        std::vector<PendingAwardEntry> result;
+        std::set<uint32_t> seen_ids;
+        for (const auto& k : keys) {
+            const std::filesystem::path f = cache_dir / ("pending_awards_" + k + ".txt");
+            const auto list = load_pending_awards(f);
+            for (const auto& entry : list) {
+                if (entry.achievement_id > 0 && entry.achievement_id < kRaWarningAchievementMinId) {
+                    if (seen_ids.insert(entry.achievement_id).second) {
+                        result.push_back(entry);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     void process_sync(const SyncItem& item) {
         rc_api_login_request_t login_params{};
         login_params.username = item.username.c_str();
@@ -973,16 +1071,15 @@ struct HttpEngine::Impl {
         const bool is_online = (login_res.http_status >= kHttpOk && login_res.http_status < 300 &&
                                 parse_res == RC_OK && login_resp.response.succeeded);
 
-        const std::string ukey = normalize_user_key(item.username);
-        const std::filesystem::path awards_file = cache_dir / ("pending_awards_" + ukey + ".txt");
-        const auto pending = load_pending_awards(awards_file);
+        const auto pre_keys = collect_candidate_user_keys({item.server_username, item.username});
+        const auto pre_pending = load_deduped_pending_awards(pre_keys);
 
         if (!is_online) {
             std::string err = (login_resp.response.error_message && *login_resp.response.error_message)
                                   ? login_resp.response.error_message
                                   : "Offline: server unavailable";
             rc_api_destroy_login_response(&login_resp);
-            SyncResult res{false, 0, static_cast<unsigned int>(pending.size()), std::move(err), ""};
+            SyncResult res{false, 0, static_cast<unsigned int>(pre_pending.size()), std::move(err), "", ""};
             queue_completion([cb = item.callback, res]() {
                 if (cb) {
                     cb(res);
@@ -991,19 +1088,29 @@ struct HttpEngine::Impl {
             return;
         }
 
+        const std::string canonical_user = (login_resp.username && *login_resp.username)
+                                               ? login_resp.username
+                                               : (!item.server_username.empty() ? item.server_username : item.username);
+        const std::string primary_ukey = normalize_user_key(canonical_user);
+        const auto active_keys = collect_candidate_user_keys({canonical_user, item.server_username, item.username});
+        const auto pending = load_deduped_pending_awards(active_keys);
+
         parent.set_offline_mode(false);
         handle_online_cache("login2", item.username, {}, {}, login_res.body);
+        if (normalize_user_key(item.username) != primary_ukey) {
+            handle_online_cache("login2", canonical_user, {}, {}, login_res.body);
+        }
         const std::string resolved_token = (login_resp.api_token && *login_resp.api_token) ? login_resp.api_token : item.token;
         rc_api_destroy_login_response(&login_resp);
 
         unsigned int synced_count = 0;
         std::vector<PendingAwardEntry> remaining;
         const std::time_t now = std::time(nullptr);
-        const std::filesystem::path unl_cache_file = cache_dir / ("unlocked_cache_" + ukey + ".txt");
+        const std::filesystem::path unl_cache_file = cache_dir / ("unlocked_cache_" + primary_ukey + ".txt");
 
         for (const auto& entry : pending) {
             rc_api_award_achievement_request_t award_params{};
-            award_params.username = !item.server_username.empty() ? item.server_username.c_str() : item.username.c_str();
+            award_params.username = canonical_user.c_str();
             award_params.api_token = resolved_token.c_str();
             award_params.achievement_id = entry.achievement_id;
             award_params.hardcore = 0;
@@ -1035,8 +1142,18 @@ struct HttpEngine::Impl {
             }
         }
 
-        save_pending_awards(awards_file, remaining);
-        SyncResult res{true, synced_count, static_cast<unsigned int>(remaining.size()), "", resolved_token};
+        const std::filesystem::path primary_awards_file = cache_dir / ("pending_awards_" + primary_ukey + ".txt");
+        save_pending_awards(primary_awards_file, remaining);
+
+        for (const auto& k : active_keys) {
+            if (k != primary_ukey) {
+                const std::filesystem::path sec_file = cache_dir / ("pending_awards_" + k + ".txt");
+                std::error_code ec;
+                std::filesystem::remove(sec_file, ec);
+            }
+        }
+
+        SyncResult res{true, synced_count, static_cast<unsigned int>(remaining.size()), "", resolved_token, canonical_user};
         queue_completion([cb = item.callback, res]() {
             if (cb) {
                 cb(res);
@@ -1046,9 +1163,15 @@ struct HttpEngine::Impl {
 };
 
 HttpEngine::HttpEngine(const std::filesystem::path& cdir)
-    : cache_dir_(cdir), impl_(std::make_unique<Impl>(*this, cdir)) {}
+    : cache_dir_(cdir / "ra_cache"), impl_(std::make_unique<Impl>(*this, cdir)) {}
 
 HttpEngine::~HttpEngine() = default;
+
+void HttpEngine::set_transport_hook(TransportHook hook) {
+    if (impl_) {
+        impl_->transport.set_hook(std::move(hook));
+    }
+}
 
 void HttpEngine::post(const rc_api_request_t* request, rc_client_server_callback_t callback, void* callback_data) {
     if (!request) {

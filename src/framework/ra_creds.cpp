@@ -242,6 +242,13 @@ Credentials resolve_credentials(const Settings& settings, const std::filesystem:
                 candidate.token = cached_token;
             }
         }
+        if (candidate.server_username.empty()) {
+            const std::string cached_srv = settings.get("ra_server_username");
+            const std::string cached_user = settings.get("ra_cached_user");
+            if (!cached_srv.empty() && (cached_user.empty() || cached_user == candidate.username)) {
+                candidate.server_username = cached_srv;
+            }
+        }
         return candidate;
     }
 
