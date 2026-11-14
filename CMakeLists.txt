@@ -63,7 +63,8 @@ add_library(dreamcomp_core OBJECT src/framework/core.cpp src/framework/settings.
                                   src/framework/hud.cpp src/framework/sharp2d.cpp
                                   src/framework/disc_folder.cpp
                                   src/framework/ra_creds.cpp
-                                  src/framework/ra_http.cpp)
+                                  src/framework/ra_http.cpp
+                                  src/framework/ra_client.cpp)
 target_include_directories(dreamcomp_core PUBLIC ${PROJECT_SOURCE_DIR}/include
                                                  ${PROJECT_SOURCE_DIR}/src/framework)
 target_link_libraries(dreamcomp_core PUBLIC dream::runtime dream::render dream::game_config rcheevos ${CMAKE_DL_LIBS})
