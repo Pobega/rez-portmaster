@@ -260,7 +260,7 @@ entries = [0x8C302E56, 0x8C302D34, 0x8C302DEC, 0x8C300D3C]
 overlay = true
 # "exit" and "recomp settings" in the main menu (src/title_exit.cpp, src/recomp_settings.cpp): the
 # menu's input and drawing, and the options screen's set 0 getter and setter.
-hooks = { "0x8C3026C4" = "title_menu_input", "0x8C302876" = "title_menu_draw", "0x8C301464" = "recomp_get@entry", "0x8C30146A" = "recomp_set@entry", "0x8C302DEC" = "ui_tag_title_menu", "0x8C300D3C" = "ui_tag_options_menu" }
+hooks = { "0x8C3026C4" = "title_menu_input", "0x8C302876" = "title_menu_draw", "0x8C301464" = "recomp_get@entry", "0x8C30146A" = "recomp_set@entry", "0x8C301094" = "recomp_sync_achievements@entry", "0x8C302DEC" = "ui_tag_title_menu", "0x8C300D3C" = "ui_tag_options_menu" }
 
 [functions]
 # Function starts the translator does not find on its own (reached through pointers or computed

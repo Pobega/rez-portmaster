@@ -25,6 +25,11 @@ Forked from [tyrannotorus/recomp-dreamcast-rez](https://github.com/tyrannotorus/
     - **`16:9`**: `426x240`, `640x360`, `854x480`, `960x544`, `1280x720`, `1920x1080`
     - **`1:1`**: `240x240`, `360x360`, `480x480`, `540x540`, `720x720`
   - **Frame Rate**: Toggle between `30 fps` (original Dreamcast pacing) and `60 fps` (60 Hz logic and rendering) on the fly.
+  - **Achievements**: Toggle RetroAchievements tracking, choose between three Rez-native top-right toast banner styles (`pause tab`, `options`, `k-project`), and trigger manual award synchronization directly from the menu.
+- **RetroAchievements (Softcore Mode)**:
+  - Full achievement tracking with non-blocking disc hashing (`rhash`), zero-delay SH-4 memory reads, and passive top-right GPU toast popups rendered via the Rez HUD pipeline in three selectable native UI styles (`pause tab`, `options`, and `k-project`).
+  - Automatic 3-tier credentials discovery: searches `settings.ini`, NextUI `minuisettings.txt` (or `ra_auth.txt`), and handheld RetroArch CFW configs across muOS, ArkOS, Knulli, and Rocknix.
+  - Resilient offline queuing: awards earned offline are safely persisted in `ra_cache/` and automatically synchronized when an internet connection becomes available, with manual sync accessible anytime from Recomp Settings.
 
 ## Supported Disc Images
 
@@ -59,6 +64,7 @@ You must supply your own Dreamcast **Rez** (V1.003) `.chd` disc image:
 ## Configuration & Save Data
 
 - **In-Game Display & FPS Settings**: Persisted automatically to `ports/rez/conf/rez_recompiled/settings.ini`.
+- **RetroAchievements Credentials & Cache**: Set `ra_username` and `ra_token` (or `ra_password`) in `settings.ini` or rely on automatic CFW credential discovery. Queued offline unlocks and badge art are cached in `ports/rez/conf/rez_recompiled/ra_cache/`.
 - **Controller Bindings**: Customizable in `ports/rez/conf/rez_recompiled/bindings.txt`.
 - **VMU Save Data**: Stored in `ports/rez/conf/rez_recompiled/vmu_a1.bin`.
 
