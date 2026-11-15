@@ -774,15 +774,25 @@ void Window::rumble(unsigned player, float strength, unsigned ms) noexcept {
     const float scaled = std::clamp(strength * rumble_scale, 0.0f, 1.0f);
     if (scaled <= 0.0f || ms == 0) {
         rumble_off();
-        if (player < pads_.size() && pads_[player])
-            SDL_GameControllerRumble(pads_[player], 0, 0, 0);
+        for (SDL_Gamepad* pad : pads_) {
+            if (pad && SDL_GameControllerHasRumble(pad))
+                SDL_GameControllerRumble(pad, 0, 0, 0);
+        }
         return;
     }
 
-    if (player < pads_.size() && pads_[player]) {
-        const Uint16 mag = static_cast<Uint16>(scaled * 65535.0f);
-        SDL_GameControllerRumble(pads_[player], mag, mag, ms);
+    const Uint16 mag = static_cast<Uint16>(scaled * 65535.0f);
+    if (player < pads_.size() && pads_[player] &&
+        SDL_GameControllerRumble(pads_[player], mag, mag, ms) == 0) {
         return;
+    }
+    if (player == 0) {
+        for (SDL_Gamepad* pad : pads_) {
+            if (pad && SDL_GameControllerHasRumble(pad) &&
+                SDL_GameControllerRumble(pad, mag, mag, ms) == 0) {
+                return;
+            }
+        }
     }
 
     if (rumble_found_uv_ < 0)
