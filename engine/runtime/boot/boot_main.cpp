@@ -2368,6 +2368,8 @@ int main(int argc, char** argv) {
                 return e.height ? static_cast<float>(e.width) / static_cast<float>(e.height) : 0.0f;
             };
             hc.set_render_aspect = [lp](float a) { lp->want_render_aspect = a; };
+            hc.set_rumble = [lp](float v) { lp->window.rumble_scale = std::clamp(v, 0.0f, 1.0f); };
+            hc.preview_rumble = [lp] { lp->window.rumble(0, 0.75f, 90); };
         }
         if (!live->overlays.empty()) {
             live->window.set_escape_quits(false);

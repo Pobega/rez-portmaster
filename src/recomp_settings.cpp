@@ -26,6 +26,7 @@ constexpr std::uint32_t kBoxSelect0 = 0x8C303F0Cu;
 constexpr std::uint32_t kBoxSelect1 = 0x8C303F38u;
 constexpr std::uint32_t kBoxSelect3 = 0x8C303F90u;
 constexpr std::uint32_t kBoxSelect4 = 0x8C303FBCu;
+constexpr std::uint32_t kBoxSelect5 = 0x8C303FE8u;
 constexpr std::uint32_t kBoxSelectItems = 0x8C30460Cu;
 constexpr std::uint32_t kIconLeftArrowWidthAddr = 0x8C10C0D4u;
 constexpr std::uint32_t kIconLeftArrowHeightAddr = 0x8C10C0D8u;
@@ -76,14 +77,15 @@ constexpr Text k60Fps{0x8C303DBCu, "reverse", "60 fps"};
 constexpr Text kToastRow{0x8C3039C8u, "point display", "toast style"};
 constexpr Text kToastHead{0x8C3039E8u, "affich. des pts", "toast style"};
 
-// Dynamic strings for Box 2 (0x8C303FE8..0x8C304097, after kBoxSelect4)
-constexpr std::uint32_t kDynStringsBase = 0x8C303FE8u;
-constexpr std::uint32_t kAchRowDynAddr = 0x8C303FE8u;
-constexpr std::uint32_t kAchHeadDynAddr = 0x8C304008u;
-constexpr std::uint32_t kRaStatusDynAddr = 0x8C304028u;
-constexpr std::uint32_t kSyncRowDynAddr = 0x8C304058u;
-constexpr std::uint32_t kSyncHeadDynAddr = 0x8C304078u;
-constexpr unsigned kDynStringsTotalSize = 176;
+// Dynamic strings for Box 2 and Box 3 (0x8C304014..0x8C3040BF, after kBoxSelect5)
+constexpr std::uint32_t kDynStringsBase = 0x8C304014u;
+constexpr std::uint32_t kAchRowDynAddr = 0x8C304014u;
+constexpr std::uint32_t kAchHeadDynAddr = 0x8C30402Cu;
+constexpr std::uint32_t kRaStatusDynAddr = 0x8C304044u;
+constexpr std::uint32_t kSyncRowDynAddr = 0x8C304064u;
+constexpr std::uint32_t kSyncHeadDynAddr = 0x8C304080u;
+constexpr std::uint32_t kRumbleRowDynAddr = 0x8C30409Cu;
+constexpr unsigned kDynStringsTotalSize = 172;
 
 void write_text(dream::Memory& m, std::uint32_t a, const char* s) {
     for (std::size_t i = 0;; ++i) {
@@ -110,7 +112,7 @@ bool g_on = true, g_page = false, g_menu = false;
 std::uint32_t g_menu_state = 0;              // the menu's state, from recomp_menu_begin to _end
 std::uint32_t g_table[9][8];                 // the menu table as the game has it, while reordered
 std::uint32_t g_rows[kRowCount][kRowWords];  // the options rows, while the page is open
-std::uint32_t g_set0[kSetWords], g_set2[kSetWords], g_box0[kBoxSelectWords], g_box1[kBoxSelectWords], g_box3[kBoxSelectWords], g_box4[kBoxSelectWords], g_box_items[kLanguageCount], g_heading[kLanguageCount];
+std::uint32_t g_set0[kSetWords], g_set2[kSetWords], g_box0[kBoxSelectWords], g_box1[kBoxSelectWords], g_box3[kBoxSelectWords], g_box4[kBoxSelectWords], g_box5[kBoxSelectWords], g_box_items[kLanguageCount], g_heading[kLanguageCount];
 char g_dyn_strings[kDynStringsTotalSize];
 
 bool text_is(dream::Memory& m, std::uint32_t a, const char* s) {
@@ -216,9 +218,12 @@ void page_open(dream::Memory& m) {
         g_box1[i] = m.read32(kBoxSelect1 + 4 * i);
         g_box3[i] = m.read32(kBoxSelect3 + 4 * i);
         g_box4[i] = m.read32(kBoxSelect4 + 4 * i);
+        g_box5[i] = m.read32(kBoxSelect5 + 4 * i);
     }
     for (unsigned i = 0; i < kDynStringsTotalSize; ++i)
         g_dyn_strings[i] = static_cast<char>(m.read8(kDynStringsBase + i));
+
+    write_text(m, kRumbleRowDynAddr, "rumble strength");
 
     for (const Text& t : {kAspectRow, kResRow, kResHead, kTitle, kHead, kFpsRow, kFpsHead, k30Fps, k60Fps, kToastRow, kToastHead})
         write_text(m, t.at, t.page);
@@ -232,6 +237,7 @@ void page_open(dream::Memory& m) {
         m.write32(kRows + kRowBytes + 4 * i, kResRow.at);
         m.write32(kRows + 2 * kRowBytes + 4 * i, kFpsRow.at);
         m.write32(kRows + 4 * kRowBytes + 4 * i, kAchRowDynAddr);
+        m.write32(kRows + 9 * kRowBytes + 4 * i, kRumbleRowDynAddr);
 
         m.write32(kHeading + 4 * i, kHead.at);
 
@@ -239,6 +245,7 @@ void page_open(dream::Memory& m) {
         m.write32(kBoxSelect1 + 4 * i, kResHead.at);
         m.write32(kBoxSelect3 + 4 * i, kToastHead.at);
         m.write32(kBoxSelect4 + 4 * i, kSyncHeadDynAddr);
+        m.write32(kBoxSelect5 + 4 * i, kRumbleRowDynAddr);
         m.write32(kBoxSelectItems + 24 * i, kSelectValue.at);
 
         m.write32(kSet0 + 4 * i, kFpsHead.at);
@@ -256,6 +263,8 @@ void page_open(dream::Memory& m) {
     m.write32(kRows + 2 * kRowBytes + 36, 0u);
     m.write32(kRows + 4 * kRowBytes + 24, kRowTypeBoxOnOff);
     m.write32(kRows + 4 * kRowBytes + 36, 2u);
+    m.write32(kRows + 9 * kRowBytes + 24, kRowTypeBoxSelect);
+    m.write32(kRows + 9 * kRowBytes + 36, 5u);
 
     const auto fam = dreamcomp::current_aspect_family();
     const auto& res_opts = dreamcomp::resolution_options(fam);
@@ -284,6 +293,12 @@ void page_open(dream::Memory& m) {
     m.write32(kBoxSelect4 + 36, kSet0Getter);
     m.write32(kBoxSelect4 + 40, kSet0Setter);
 
+    m.write32(kBoxSelect5 + 24, kBoxSelectItems);
+    m.write32(kBoxSelect5 + 28, 0u);
+    m.write32(kBoxSelect5 + 32, static_cast<std::uint32_t>(dreamcomp::RumbleLevel::Count) - 1u);
+    m.write32(kBoxSelect5 + 36, kSet0Getter);
+    m.write32(kBoxSelect5 + 40, kSet0Setter);
+
     m.write32(kSet0 + 72, kSet0Getter);
     m.write32(kSet0 + 76, kSet0Setter);
 
@@ -296,10 +311,11 @@ void page_open(dream::Memory& m) {
 
     const unsigned cur_res = dreamcomp::current_resolution_index();
     const char* label = (cur_res < res_opts.size()) ? res_opts[cur_res].label : "unknown";
-    std::printf("rez: recomp settings opened (aspect %s, res %s, %u fps, achievements %s, toast %s)\n",
+    std::printf("rez: recomp settings opened (aspect %s, res %s, %u fps, achievements %s, toast %s, rumble %s)\n",
                 dreamcomp::aspect_family_label(fam), label, rez::native_sys_get_frame_rate(),
                 dreamcomp::ra::is_enabled() ? "on" : "off",
-                dreamcomp::ra::toast_style_label(dreamcomp::ra::toast_style()));
+                dreamcomp::ra::toast_style_label(dreamcomp::ra::toast_style()),
+                dreamcomp::rumble_level_label(dreamcomp::current_rumble_level()));
 }
 
 void page_close(dream::Memory& m) {
@@ -320,6 +336,7 @@ void page_close(dream::Memory& m) {
         m.write32(kBoxSelect1 + 4 * i, g_box1[i]);
         m.write32(kBoxSelect3 + 4 * i, g_box3[i]);
         m.write32(kBoxSelect4 + 4 * i, g_box4[i]);
+        m.write32(kBoxSelect5 + 4 * i, g_box5[i]);
     }
     for (unsigned i = 0; i < kDynStringsTotalSize; ++i)
         m.write8(kDynStringsBase + i, static_cast<std::uint8_t>(g_dyn_strings[i]));
@@ -404,6 +421,8 @@ DC_HOOK_ENTRY(recomp_get) {
             c.r[0] = dreamcomp::current_resolution_index();
         } else if (c.r[13] == rez::kBoxSelect3) {
             c.r[0] = static_cast<std::uint32_t>(dreamcomp::ra::toast_style());
+        } else if (c.r[13] == rez::kBoxSelect5) {
+            c.r[0] = static_cast<std::uint32_t>(dreamcomp::current_rumble_level());
         } else {
             c.r[0] = 0u;
         }
@@ -422,6 +441,8 @@ DC_HOOK_ENTRY(recomp_get) {
         } else if (c.r[14] == rez::kBoxSelect4) {
             dyn_label = dreamcomp::ra::menu_sync_unsynced_label();
             label = dyn_label.c_str();
+        } else if (c.r[14] == rez::kBoxSelect5) {
+            label = dreamcomp::rumble_level_label(dreamcomp::current_rumble_level());
         }
         char buf[rez::kSelectValueMaxLen + 1];
         std::snprintf(buf, sizeof(buf), "%.15s", label);
@@ -455,6 +476,9 @@ DC_HOOK_ENTRY(recomp_set) {
             c.r[0] = 1u;
         } else if (c.r[13] == rez::kBoxSelect3) {
             dreamcomp::ra::set_toast_style(static_cast<dreamcomp::ra::ToastStyle>(c.r[4]));
+            c.r[0] = 1u;
+        } else if (c.r[13] == rez::kBoxSelect5) {
+            dreamcomp::set_rumble_level(static_cast<dreamcomp::RumbleLevel>(c.r[4]));
             c.r[0] = 1u;
         }
     } else if (c.r[14] == rez::kSet0) {

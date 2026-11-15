@@ -26,7 +26,7 @@ namespace dream::render::vk {
 namespace {
 
 constexpr int kRumbleMinUv = 500000;
-constexpr int kRumbleMaxUv = 3300000;
+constexpr int kRumbleMaxUv = 2200000;
 constexpr const char* kRumblePowerPath = "/sys/class/gpio/gpio227/value";
 constexpr const char* kRumbleVoltagePath = "/sys/class/motor/voltage";
 constexpr const char* kControllerDbFile = "gamecontrollerdb.txt";
@@ -785,9 +785,12 @@ void Window::rumble(unsigned player, float strength, unsigned ms) noexcept {
         return;
     }
 
-    const int uv = kRumbleMinUv + static_cast<int>(scaled * static_cast<float>(kRumbleMaxUv - kRumbleMinUv));
     if (rumble_found_uv_ < 0)
         rumble_found_uv_ = read_sysfs_int(kRumbleVoltagePath);
+    const int ceiling_uv = (rumble_found_uv_ > kRumbleMinUv)
+                               ? std::min(rumble_found_uv_, kRumbleMaxUv)
+                               : kRumbleMaxUv;
+    const int uv = kRumbleMinUv + static_cast<int>(scaled * static_cast<float>(ceiling_uv - kRumbleMinUv));
     if (uv != rumble_uv_) {
         write_sysfs_int(kRumbleVoltagePath, uv);
         rumble_uv_ = uv;

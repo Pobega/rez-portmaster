@@ -25,6 +25,7 @@ Forked from [tyrannotorus/recomp-dreamcast-rez](https://github.com/tyrannotorus/
     - **`16:9`**: `426x240`, `640x360`, `854x480`, `960x544`, `1280x720`, `1920x1080`
     - **`1:1`**: `240x240`, `360x360`, `480x480`, `540x540`, `720x720`
   - **Frame Rate**: Toggle between `30 fps` (original Dreamcast pacing) and `60 fps` (60 Hz logic and rendering) on the fly.
+  - **Rumble Strength**: Adjust controller and handheld ERM motor vibration intensity between `off`, `25%`, `50%` (safe default), `75%`, and `100%`, with an instant haptic preview pulse upon selection.
   - **Achievements**: Toggle RetroAchievements tracking, choose between three Rez-native top-right toast banner styles (`pause tab`, `options`, `k-project`), and trigger manual award synchronization directly from the menu.
 - **RetroAchievements (Softcore Mode)**:
   - Full achievement tracking with non-blocking disc hashing (`rhash`), zero-delay SH-4 memory reads, and passive top-right GPU toast popups rendered via the Rez HUD pipeline in three selectable native UI styles (`pause tab`, `options`, and `k-project`).
@@ -77,6 +78,7 @@ Open **Options -> Recomp Settings** from the title screen to configure achieveme
 - **`RetroAchievements`** (`on` / `off`): Toggles runtime achievement tracking and toast banners.
 - **`RA: <login_status>`**: Shown when RetroAchievements are enabled; displays the current account status (`Offline`, `No account setup`, or the logged-in username).
 - **`toast style`** (`pause tab` / `options` / `k-project`): Shown when RetroAchievements are enabled; selects the visual theme for notifications and immediately triggers a live preview toast in the top-right corner.
+- **`rumble strength`** (`off` / `25%` / `50%` / `75%` / `100%`): Configures controller and handheld ERM vibration intensity, defaults to a safe handheld-friendly `50%` ceiling, and triggers an immediate haptic preview pulse.
 - **`Sync RetroAchievements`**: Shown when RetroAchievements are enabled; displays **`Progress (X/Y)`** and **`Unsynced: N`** in its right-hand subpanel, and pressing confirm triggers an immediate connection and awards synchronization flush.
 
 ### Offline Mode & Synchronization

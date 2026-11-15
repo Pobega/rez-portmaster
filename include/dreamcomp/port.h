@@ -123,6 +123,19 @@ const std::vector<ResolutionOption>& resolution_options(AspectFamily family);
 unsigned current_resolution_index();
 void set_resolution_index(unsigned index);
 
+enum class RumbleLevel : unsigned {
+    Off = 0,
+    Percent25 = 1,
+    Percent50 = 2,
+    Percent75 = 3,
+    Percent100 = 4,
+    Count = 5
+};
+
+const char* rumble_level_label(RumbleLevel level);
+RumbleLevel current_rumble_level();
+void set_rumble_level(RumbleLevel level);
+
 struct RegisterPort {
     explicit RegisterPort(const PortInfo& info);
 };

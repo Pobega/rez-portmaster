@@ -46,6 +46,7 @@ Settings g_settings;
 // A handheld: the Dreamcast's own 640x480 by default, or the panel's own ("panel").
 constexpr int kMaxScale = 2;
 constexpr int kDefaultScale = 1;
+constexpr int kDefaultRumblePercent = 50;
 static_assert(kScalePanel == static_cast<int>(dream::host::HostControls::kScalePanel));
 
 // The setting `scale`: a multiple of 640x480 held to this build's range, or "panel", the display's
@@ -99,9 +100,9 @@ void drop_flag(std::vector<std::string>& a, const char* f, bool takes_value) {
 // (first wins). A flag the user passed wins over the setting.
 void add_input_and_mod_flags(std::vector<std::string>& args,
                              const std::filesystem::path& config_dir) {
-    if (!has_flag(args, "--rumble") && !g_settings.get("rumble").empty()) {
+    if (!has_flag(args, "--rumble")) {
         args.push_back("--rumble");
-        args.push_back(std::to_string(std::clamp(g_settings.get_int("rumble", 100), 0, 100)));
+        args.push_back(std::to_string(std::clamp(g_settings.get_int("rumble", kDefaultRumblePercent), 0, 100)));
     }
     if (!has_flag(args, "--volume") && !g_settings.get("volume").empty()) {
         args.push_back("--volume");
@@ -1005,6 +1006,67 @@ void set_aspect_family(AspectFamily family) {
         }
     }
     set_resolution_index(default_idx);
+}
+
+const char* rumble_level_label(RumbleLevel level) {
+    switch (level) {
+        case RumbleLevel::Off:
+            return "off";
+        case RumbleLevel::Percent25:
+            return "25%";
+        case RumbleLevel::Percent50:
+            return "50%";
+        case RumbleLevel::Percent75:
+            return "75%";
+        case RumbleLevel::Percent100:
+            return "100%";
+        default:
+            return "50%";
+    }
+}
+
+RumbleLevel current_rumble_level() {
+    const int val = g_settings.get_int("rumble", kDefaultRumblePercent);
+    if (val <= 12)
+        return RumbleLevel::Off;
+    if (val <= 37)
+        return RumbleLevel::Percent25;
+    if (val <= 62)
+        return RumbleLevel::Percent50;
+    if (val <= 87)
+        return RumbleLevel::Percent75;
+    return RumbleLevel::Percent100;
+}
+
+void set_rumble_level(RumbleLevel level) {
+    int pct = 50;
+    switch (level) {
+        case RumbleLevel::Off:
+            pct = 0;
+            break;
+        case RumbleLevel::Percent25:
+            pct = 25;
+            break;
+        case RumbleLevel::Percent50:
+            pct = 50;
+            break;
+        case RumbleLevel::Percent75:
+            pct = 75;
+            break;
+        case RumbleLevel::Percent100:
+            pct = 100;
+            break;
+        default:
+            pct = 50;
+            break;
+    }
+    g_settings.set("rumble", std::to_string(pct));
+    g_settings.save();
+    auto& hc = dream::host::host_controls();
+    if (hc.set_rumble)
+        hc.set_rumble(static_cast<float>(pct) / 100.0f);
+    if (pct > 0 && hc.preview_rumble)
+        hc.preview_rumble();
 }
 
 RegisterPort::RegisterPort(const PortInfo& info) { g_port = &info; }

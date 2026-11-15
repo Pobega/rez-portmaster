@@ -346,7 +346,8 @@ Reply VibrationPack::handle(std::uint8_t command, const std::uint32_t* args, std
             else if (!(condition & 0x0800u))
                 inc = 0;  // neither EXH nor INH: constant
             const bool continuous = condition & 1u;
-            const float strength = std::min(1.0f, static_cast<float>(pos + neg) / 7.0f);
+            constexpr float kMaxPushPullPower = 14.0f;
+            const float strength = std::min(1.0f, static_cast<float>(pos + neg) / kMaxPushPullPower);
             unsigned ms = auto_stop_ms;
             if (freq > 0 && (!continuous || inc != 0)) {
                 const unsigned steps = inc ? static_cast<unsigned>(std::abs(inc)) * std::max(pos, neg) : 1u;
